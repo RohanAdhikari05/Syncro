@@ -12,7 +12,7 @@ export type ApiFetchOptions = {
 }
 
 export type ApiFetchResult<T> =
-  | { ok: true; data: T; status: number }
+  | { ok: true; data: T; status: number; unauthorized?: boolean; forbidden?: boolean }
   | { ok: false; error: string; status: number; unauthorized?: boolean; forbidden?: boolean }
 
 function buildHeaders(token?: string | null): HeadersInit {
