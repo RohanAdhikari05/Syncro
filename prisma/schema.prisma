@@ -17,13 +17,12 @@ enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
+}
 
 enum TaskPriority {
   LOW
   MEDIUM
   HIGH
-}
-
 }
 enum ProjectStatus{
   active

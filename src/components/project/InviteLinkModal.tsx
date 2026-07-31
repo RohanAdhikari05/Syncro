@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 
 interface InviteLinkModalProps {
   projectId: string;
-  inviteCode: string;
+  inviteCode?: string;
 }
 
 export default function InviteLinkModal({ projectId, inviteCode }: InviteLinkModalProps) {

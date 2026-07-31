@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { TaskStatus, TaskPriority } from "@prisma/client";
 import { ProjectService } from "@/services/project.service";
 import type { Task, CreateTaskInput, UpdateTaskInput } from "@/types";
 
@@ -252,7 +253,7 @@ export class TaskService {
     const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
     const isAssignee = task.assigneeId === requesterId;
     if (!isOwner && !isAdmin && !isAssignee) throw new Error('Not authorized to change status');
-    await prisma.task.update({ where: { id: taskId }, data: { status } });
+    await prisma.task.update({ where: { id: taskId }, data: { status: status as TaskStatus } });
   }
 
   /** Set task priority */
@@ -263,7 +264,7 @@ export class TaskService {
     const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
     const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
     if (!isOwner && !isAdmin) throw new Error('Only project owners or admins can set priority');
-    await prisma.task.update({ where: { id: taskId }, data: { priority } });
+    await prisma.task.update({ where: { id: taskId }, data: { priority: priority as TaskPriority } });
   }
 
   /** Set task labels */
