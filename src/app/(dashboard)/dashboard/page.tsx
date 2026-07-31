@@ -18,10 +18,17 @@ async function fetchApi<T>(path: string, token: string | null): Promise<T | null
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const response = await fetch(`${baseUrl}${path}`, { headers, cache: "no-store" });
-  if (!response.ok) return null;
-  return response.json() as Promise<T>;
+  const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || vercelUrl || "http://localhost:3000";
+  
+  try {
+    const response = await fetch(`${baseUrl}${path}`, { headers, cache: "no-store" });
+    if (!response.ok) return null;
+    return response.json() as Promise<T>;
+  } catch (error) {
+    console.error(`[fetchApi] Error fetching ${path}:`, error);
+    return null;
+  }
 }
 
 const quickActions = [
