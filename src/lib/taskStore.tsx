@@ -1,6 +1,8 @@
 'use client'
 
 import { useAuth } from '@clerk/nextjs'
+import type { ProjectRole } from '@/types/project'
+import { apiFetch } from '@/lib/api-client'
 import {
   createContext,
   useCallback,
@@ -45,8 +47,17 @@ export interface StoreProject {
   color: string
   priority: 'high' | 'medium' | 'low'
   status: ProjectStatus
+  currentUserRole?: ProjectRole | null
   lead: { initials: string; name: string; color: string; text: string }
-  members: { initials: string; color: string; text: string; name: string }[]
+  members: {
+    id?: string
+    userId?: string
+    role?: ProjectRole
+    initials: string
+    color: string
+    text: string
+    name: string
+  }[]
 }
 
 interface TaskStore {
@@ -109,8 +120,29 @@ function toColor(name: string) {
 function mapProject(raw: any): StoreProject {
   const name = typeof raw?.name === 'string' && raw.name.trim() ? raw.name : 'Untitled project'
   const description = typeof raw?.description === 'string' ? raw.description : ''
-  const initials = buildInitials(name)
   const color = typeof raw?.color === 'string' ? raw.color : toColor(name)
+
+  const members = Array.isArray(raw?.members)
+    ? raw.members.map((m: any) => {
+        const mName = m?.name || 'Unknown User'
+        return {
+          id: m?.id,
+          userId: m?.userId,
+          role: m?.role,
+          initials: buildInitials(mName),
+          color: toColor(mName),
+          text: '#ffffff',
+          name: mName,
+        }
+      })
+    : []
+
+  const owner = members.find((m: any) => m.role === 'OWNER') || members[0] || {
+    initials: buildInitials('Owner'),
+    name: 'Owner',
+    color,
+    text: '#ffffff'
+  }
 
   return {
     id: raw?.id ?? '',
@@ -119,21 +151,14 @@ function mapProject(raw: any): StoreProject {
     color,
     priority: 'medium',
     status: normalizeProjectStatus(raw?.status),
+    currentUserRole: raw?.currentUserRole ?? null,
     lead: {
-      initials,
-      name: 'Project owner',
-      color,
-      text: '#ffffff',
+      initials: owner.initials,
+      name: owner.name,
+      color: owner.color,
+      text: owner.text,
     },
-    members:
-      Array.isArray(raw?.members) && raw.members.length > 0
-        ? raw.members.map((member: any) => ({
-            initials: buildInitials(member?.name ?? name),
-            color: toColor(member?.name ?? name),
-            text: '#ffffff',
-            name: member?.name ?? 'Team member',
-          }))
-        : [],
+    members,
   }
 }
 
@@ -146,21 +171,33 @@ function mapTask(raw: any, projectLookup: Record<string, StoreProject>): StoreTa
         : projectLookup[raw?.projectId ?? '']?.name ?? 'Unknown project'
 
   const assignees = Array.isArray(raw?.assignees)
-    ? raw.assignees.map((assignee: any) => ({
-        id: assignee?.id ?? '',
-        name: assignee?.name ?? 'Unassigned',
-        initials: buildInitials(assignee?.name ?? 'Unassigned'),
-        color: assignee?.color ?? '#6366f1',
-        text: assignee?.text ?? '#ffffff',
-        isMe: Boolean(assignee?.isMe),
-      }))
+    ? raw.assignees.map((assignee: any) => {
+        const aName = assignee?.name || 'Unknown User'
+        return {
+          id: assignee?.id ?? '',
+          name: aName,
+          initials: buildInitials(aName),
+          color: assignee?.color ?? toColor(aName),
+          text: assignee?.text ?? '#ffffff',
+          isMe: Boolean(assignee?.isMe),
+        }
+      })
     : []
 
-  if (raw?.assigneeId && assignees.length === 0) {
+  if (raw?.assignee) {
+    const aName = raw.assignee?.name || 'Unknown User'
+    assignees.push({
+      id: raw.assignee.id ?? '',
+      name: aName,
+      initials: buildInitials(aName),
+      color: toColor(aName),
+      text: '#ffffff',
+    })
+  } else if (raw?.assigneeId && assignees.length === 0) {
     assignees.push({
       id: raw.assigneeId,
-      name: 'Assigned member',
-      initials: 'AM',
+      name: 'Unknown User',
+      initials: 'UU',
       color: '#6366f1',
       text: '#ffffff',
     })
@@ -234,16 +271,25 @@ export function TaskStoreProvider({ children }: { children: React.ReactNode }) {
       const headers = buildAuthHeaders(token)
 
       const [projectsResponse, tasksResponse] = await Promise.all([
-        fetch('/api/v1/projects', { headers, cache: 'no-store' }),
-        fetch('/api/v1/tasks', { headers, cache: 'no-store' }),
+        apiFetch<{ success?: boolean; projects?: unknown[]; error?: string }>(
+          '/api/v1/projects',
+          { token },
+        ),
+        apiFetch<{ success?: boolean; tasks?: unknown[]; error?: string }>(
+          '/api/v1/tasks',
+          { token },
+        ),
       ])
 
-      const projectsData = await projectsResponse.json().catch(() => null)
-      const tasksData = await tasksResponse.json().catch(() => null)
-
-      if (!projectsResponse.ok || !tasksResponse.ok) {
-        throw new Error(projectsData?.error || tasksData?.error || 'Failed to load data')
+      if (!projectsResponse.ok) {
+        throw new Error(projectsResponse.error)
       }
+      if (!tasksResponse.ok) {
+        throw new Error(tasksResponse.error)
+      }
+
+      const projectsData = projectsResponse.data
+      const tasksData = tasksResponse.data
 
       const mappedProjects = Array.isArray(projectsData?.projects)
         ? projectsData.projects.map(mapProject)

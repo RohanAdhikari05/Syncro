@@ -3,8 +3,17 @@
 import { FormEvent, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { FieldError, StatusMessage } from '@/components/shared/StatusMessage'
+import { apiFetch } from '@/lib/api-client'
 import { useTaskStore } from '@/lib/taskStore'
+import {
+  validateInviteCode,
+  validateProjectDescription,
+  validateProjectName,
+  type FieldErrors,
+} from '@/lib/validation'
 
 type Priority = 'high' | 'medium' | 'low'
 
@@ -17,8 +26,9 @@ const priorityStyles: Record<Priority, string> = {
 }
 
 export default function ProjectsClient() {
+  const router = useRouter()
   const { getToken } = useAuth()
-  const { projects, isLoading, createProject, refreshData } = useTaskStore()
+  const { projects, isLoading, error: storeError, createProject, refreshData } = useTaskStore()
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -26,29 +36,65 @@ export default function ProjectsClient() {
   const [status, setStatus] = useState<Status>('active')
   const [joinCode, setJoinCode] = useState('')
   const [joinMessage, setJoinMessage] = useState<string | null>(null)
+  const [joinMessageType, setJoinMessageType] = useState<'success' | 'error' | 'info'>('info')
   const [joining, setJoining] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createMessage, setCreateMessage] = useState<string | null>(null)
+  const [createMessageType, setCreateMessageType] = useState<'success' | 'error'>('error')
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [joinFieldError, setJoinFieldError] = useState<string | null>(null)
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!name.trim()) return
 
-    await createProject({
-      name: name.trim(),
-      description: description.trim() || 'No description provided yet.',
-    })
+    const errors: FieldErrors = {}
+    const nameError = validateProjectName(name)
+    const descError = validateProjectDescription(description)
+    if (nameError) errors.name = nameError
+    if (descError) errors.description = descError
+    setFieldErrors(errors)
 
-    setName('')
-    setDescription('')
-    setPriority('medium')
-    setStatus('active')
-    setShowCreate(false)
+    if (Object.keys(errors).length > 0) {
+      setCreateMessageType('error')
+      setCreateMessage('Please fix the errors below before creating the project.')
+      return
+    }
+
+    setCreating(true)
+    setCreateMessage(null)
+
+    try {
+      await createProject({
+        name: name.trim(),
+        description: description.trim() || 'No description provided yet.',
+      })
+
+      setName('')
+      setDescription('')
+      setPriority('medium')
+      setStatus('active')
+      setFieldErrors({})
+      setCreateMessageType('success')
+      setCreateMessage('Project created successfully.')
+      setShowCreate(false)
+    } catch (error) {
+      setCreateMessageType('error')
+      setCreateMessage(
+        error instanceof Error ? error.message : 'Unable to create project. Please try again.',
+      )
+    } finally {
+      setCreating(false)
+    }
   }
 
   async function handleJoinProject(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
 
-    if (!joinCode.trim()) {
-      setJoinMessage('Enter an invite code to join a project.')
+    const codeError = validateInviteCode(joinCode)
+    setJoinFieldError(codeError)
+    if (codeError) {
+      setJoinMessageType('error')
+      setJoinMessage(codeError)
       return
     }
 
@@ -57,25 +103,35 @@ export default function ProjectsClient() {
 
     try {
       const token = await getToken({ template: 'postman' })
-      const response = await fetch(`/api/v1/projects/join/${encodeURIComponent(joinCode.trim())}`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      })
+      const result = await apiFetch<{ success?: boolean; project?: { id?: string }; error?: string }>(
+        `/api/v1/projects/join/${encodeURIComponent(joinCode.trim())}`,
+        { method: 'POST', token, router },
+      )
 
-      const data = await response.json().catch(() => null)
-      if (!response.ok || !data?.success) {
-        throw new Error(data?.error || 'Unable to join project')
+      if (!result.ok) {
+        if (result.status === 404) {
+          throw new Error('Invalid invite code — no project matches this code.')
+        }
+        if (result.status === 409) {
+          throw new Error('You are already a member of this project.')
+        }
+        throw new Error(result.error)
       }
 
       setJoinCode('')
+      setJoinFieldError(null)
+      setJoinMessageType('success')
       setJoinMessage('You joined the project successfully.')
       await refreshData()
+
+      if (result.data.project?.id) {
+        router.push(`/projects/${result.data.project.id}`)
+      }
     } catch (error) {
-      setJoinMessage(error instanceof Error ? error.message : 'Unable to join project')
+      setJoinMessageType('error')
+      setJoinMessage(
+        error instanceof Error ? error.message : 'Unable to join project. Please try again.',
+      )
     } finally {
       setJoining(false)
     }
@@ -96,48 +152,79 @@ export default function ProjectsClient() {
         </Button>
       </div>
 
+      {storeError && (
+        <StatusMessage type="error" message={storeError} className="mb-4" />
+      )}
+
       <section className="mb-8 rounded-[18px] border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Join a project</h2>
             <p className="text-sm text-muted-foreground mt-1">Use an invite code to join a team workspace quickly.</p>
           </div>
-          <form onSubmit={handleJoinProject} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              value={joinCode}
-              onChange={(event) => setJoinCode(event.target.value)}
-              placeholder="Enter invite code"
-              className="rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
-            />
+          <form onSubmit={handleJoinProject} className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <div className="flex flex-col">
+              <input
+                value={joinCode}
+                onChange={(event) => {
+                  setJoinCode(event.target.value)
+                  setJoinFieldError(null)
+                }}
+                placeholder="Enter invite code"
+                className="rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+              />
+              <FieldError message={joinFieldError} />
+            </div>
             <Button type="submit" className="rounded-lg" disabled={joining}>
               {joining ? 'Joining…' : 'Join'}
             </Button>
           </form>
         </div>
-        {joinMessage && <p className="mt-3 text-sm text-muted-foreground">{joinMessage}</p>}
+        {joinMessage && (
+          <StatusMessage
+            type={joinMessageType === 'success' ? 'success' : 'error'}
+            message={joinMessage}
+            className="mt-3"
+          />
+        )}
       </section>
 
       {showCreate && (
         <section className="mb-8 rounded-[18px] border border-border bg-card p-6 shadow-sm">
           <h2 className="text-sm font-semibold text-foreground mb-3">Create a new project</h2>
+          {createMessage && (
+            <StatusMessage
+              type={createMessageType === 'success' ? 'success' : 'error'}
+              message={createMessage}
+              className="mb-4"
+            />
+          )}
           <form onSubmit={handleCreateProject} className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col text-sm text-muted-foreground">
-              Project name
+              Project name *
               <input
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value)
+                  setFieldErrors((prev) => ({ ...prev, name: '' }))
+                }}
                 className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                 placeholder="E.g. Marketing launch"
               />
+              <FieldError message={fieldErrors.name} />
             </label>
             <label className="flex flex-col text-sm text-muted-foreground">
               Description
               <textarea
                 value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                onChange={(event) => {
+                  setDescription(event.target.value)
+                  setFieldErrors((prev) => ({ ...prev, description: '' }))
+                }}
                 className="mt-2 min-h-30 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                 placeholder="Short summary of this project"
               />
+              <FieldError message={fieldErrors.description} />
             </label>
             <label className="flex flex-col text-sm text-muted-foreground">
               Priority
@@ -164,8 +251,8 @@ export default function ProjectsClient() {
               </select>
             </label>
             <div className="sm:col-span-2 text-right">
-              <Button type="submit" className="rounded-lg">
-                Create project
+              <Button type="submit" className="rounded-lg" disabled={creating}>
+                {creating ? 'Creating…' : 'Create project'}
               </Button>
             </div>
           </form>

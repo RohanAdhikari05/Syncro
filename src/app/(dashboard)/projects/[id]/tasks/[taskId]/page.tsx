@@ -7,6 +7,20 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { FieldError, StatusMessage } from '@/components/shared/StatusMessage'
+import { apiFetch } from '@/lib/api-client'
+import { canDeleteTask, canEditTask } from '@/lib/permissions'
+import {
+  buildAssigneesFromApi,
+  mapProjectMembers,
+  normalizeTaskStatus,
+} from '@/lib/task-utils'
+import type { ProjectRole } from '@/types/project'
+import {
+  validateDueDate,
+  validateTaskTitle,
+  type FieldErrors,
+} from '@/lib/validation'
 import type { TaskStatus } from '@/lib/taskStore'
 
 // ── Moved outside component ───────────────────────────────────────────────────
@@ -35,6 +49,7 @@ type ProjectTaskDetailItem = {
   createdAt: string
   projectId: string
   projectName: string
+  createdById?: string
   tags: { label: string; color: string }[]
   assignees: {
     id: string
@@ -55,9 +70,22 @@ export default function ProjectTaskDetailPage({
   const resolvedParams = use(params)
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const [task, setTask] = useState<ProjectTaskDetailItem | null>(null)
+  const [projectMembers, setProjectMembers] = useState<{id: string, name: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [editTitle, setEditTitle] = useState("")
+  const [editDesc, setEditDesc] = useState("")
+  const [editPriority, setEditPriority] = useState<"high" | "medium" | "low">("medium")
+  const [editDueDate, setEditDueDate] = useState("")
+  const [editAssigneeId, setEditAssigneeId] = useState("")
+  const [updating, setUpdating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<ProjectRole | null>(null)
+  const [editFieldErrors, setEditFieldErrors] = useState<FieldErrors>({})
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
@@ -82,6 +110,15 @@ export default function ProjectTaskDetailPage({
         if (!response.ok || !data?.success) {
           throw new Error(data?.error || 'Task not found')
         }
+
+        const projectResponse = await fetch(`/api/v1/projects`, {
+          headers: {
+            Accept: 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          cache: 'no-store',
+        })
+        const projectsData = await projectResponse.json().catch(() => null)
 
         if (!cancelled) {
           const apiTask = data.task
@@ -109,6 +146,16 @@ export default function ProjectTaskDetailPage({
                 ]
               : [],
           })
+
+          if (projectsData?.success && Array.isArray(projectsData.projects)) {
+            const currentProject = projectsData.projects.find((p: any) => p.id === (apiTask?.projectId ?? ''))
+            if (currentProject && Array.isArray(currentProject.members)) {
+              setProjectMembers(currentProject.members.map((m: any) => ({
+                id: m.userId || m.id,
+                name: m.name || 'Unknown'
+              })))
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -178,6 +225,82 @@ export default function ProjectTaskDetailPage({
     }
   }
 
+  async function handleEditTask(e: React.FormEvent) {
+    e.preventDefault()
+    if (!task) return
+    setUpdating(true)
+    setError(null)
+    try {
+      const token = await getToken({ template: 'postman' })
+      const response = await fetch(`/api/v1/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          description: editDesc.trim(),
+          priority: editPriority.toUpperCase(),
+          dueDate: editDueDate || null,
+          assigneeId: editAssigneeId || null,
+        }),
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Unable to update task')
+      }
+
+      setTask((current) => current ? {
+        ...current,
+        title: editTitle.trim(),
+        description: editDesc.trim(),
+        priority: editPriority,
+        dueDate: editDueDate ? new Date(editDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : undefined,
+        assignees: editAssigneeId ? [{
+          id: editAssigneeId,
+          name: projectMembers.find(m => m.id === editAssigneeId)?.name || 'User',
+          initials: 'U',
+          color: '#6366f1',
+          text: '#ffffff'
+        }] : []
+      } : null)
+      setShowEdit(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update task')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  async function handleDeleteTask() {
+    if (!task) return
+    setDeleting(true)
+    setError(null)
+    try {
+      const token = await getToken({ template: 'postman' })
+      const response = await fetch(`/api/v1/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: {
+          Accept: 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Unable to delete task')
+      }
+
+      router.push(`/projects/${task.projectId}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete task')
+      setDeleting(false)
+    }
+  }
+
   return (
     <main className="flex-1 p-8 max-w-3xl">
 
@@ -211,6 +334,23 @@ export default function ProjectTaskDetailPage({
           {task.title}
         </h1>
         <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setEditTitle(task.title)
+              setEditDesc(task.description)
+              setEditPriority(task.priority)
+              // Convert to YYYY-MM-DD
+              const dd = task.dueDate ? new Date(task.dueDate) : null
+              setEditDueDate(dd && !isNaN(dd.getTime()) ? dd.toISOString().split('T')[0] : "")
+              setEditAssigneeId(task.assignees[0]?.id || "")
+              setShowEdit(true)
+            }}
+            className="text-xs shrink-0 rounded-lg border border-border text-muted-foreground"
+          >
+            Edit task
+          </Button>
           <Link
             href={`/tasks/${task.id}`}
             className="text-xs font-medium text-primary hover:opacity-70 transition-opacity px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30"
@@ -219,6 +359,92 @@ export default function ProjectTaskDetailPage({
           </Link>
         </div>
       </div>
+
+      {showEdit && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.35)" }}
+          onClick={(e) => e.target === e.currentTarget && setShowEdit(false)}
+        >
+          <section className="w-full max-w-lg rounded-2xl bg-card shadow-2xl p-6 border border-border">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-foreground">Edit Task</h2>
+              <button
+                onClick={() => setShowEdit(false)}
+                className="text-muted-foreground hover:text-foreground text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleEditTask} className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col text-sm text-muted-foreground sm:col-span-2">
+                Task title
+                <input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required
+                  className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                />
+              </label>
+              <label className="flex flex-col text-sm text-muted-foreground sm:col-span-2">
+                Description
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 resize-none"
+                />
+              </label>
+              <label className="flex flex-col text-sm text-muted-foreground">
+                Priority
+                <select
+                  value={editPriority}
+                  onChange={(e) => setEditPriority(e.target.value as any)}
+                  className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label className="flex flex-col text-sm text-muted-foreground">
+                Assignee
+                <select
+                  value={editAssigneeId}
+                  onChange={(e) => setEditAssigneeId(e.target.value)}
+                  className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">Unassigned</option>
+                  {projectMembers.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-sm text-muted-foreground sm:col-span-2">
+                Due date
+                <input
+                  type="date"
+                  value={editDueDate}
+                  onChange={(e) => setEditDueDate(e.target.value)}
+                  className="mt-2 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                />
+              </label>
+              <div className="sm:col-span-2 flex items-center justify-end gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEdit(false)}
+                  className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <Button type="submit" className="rounded-lg text-sm" disabled={updating}>
+                  {updating ? "Saving..." : "Save changes"}
+                </Button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
@@ -251,8 +477,8 @@ export default function ProjectTaskDetailPage({
                 {task.assignees.length === 0 && (
                   <p className="text-xs text-muted-foreground">No assignees yet.</p>
                 )}
-                {task.assignees.map((a, i) => (
-                  <div key={a.id ?? i} className="flex items-center justify-between">
+                {task.assignees.map((a) => (
+                  <div key={a.id ?? a.name} className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div
                         className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
@@ -359,8 +585,16 @@ export default function ProjectTaskDetailPage({
 
           <Separator />
 
-          <button className="text-xs font-medium text-destructive hover:text-destructive/80 transition-colors text-left">
-            Delete task
+          <button
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this task?")) {
+                handleDeleteTask()
+              }
+            }}
+            disabled={deleting}
+            className="text-xs font-medium text-destructive hover:text-destructive/80 transition-colors text-left"
+          >
+            {deleting ? "Deleting..." : "Delete task"}
           </button>
 
         </div>

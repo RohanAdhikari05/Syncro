@@ -125,6 +125,51 @@ export async function PATCH(
     const body = await request.json();
     const { title, description, status, assigneeId, dueDate, order } = body;
 
+    if (title !== undefined) {
+      if (typeof title !== 'string' || !title.trim()) {
+        return NextResponse.json(
+          { error: 'title cannot be empty' },
+          { status: 400 },
+        );
+      }
+      if (title.trim().length > 200) {
+        return NextResponse.json(
+          { error: 'title must be at most 200 characters' },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (assigneeId !== undefined && assigneeId !== null) {
+      const assigneeIsMember = await ProjectService.isUserAlreadyMember(
+        existing.projectId,
+        String(assigneeId),
+      );
+      if (!assigneeIsMember) {
+        return NextResponse.json(
+          { error: 'Assignee must be a member of the project' },
+          { status: 400 },
+        );
+      }
+    }
+
+    let parsedDueDate: Date | null | undefined = undefined;
+    if (dueDate !== undefined) {
+      if (dueDate === null) {
+        parsedDueDate = null;
+      } else {
+        const date = new Date(dueDate);
+        if (isNaN(date.getTime())) {
+          return NextResponse.json(
+            { error: 'Invalid due date' },
+            { status: 400 },
+          );
+        }
+        date.setHours(23, 59, 59, 999);
+        parsedDueDate = date;
+      }
+    }
+
     const updatedTask = await TaskService.update(id, {
       ...(title !== undefined && { title: String(title).trim() }),
       ...(description !== undefined && {
@@ -135,9 +180,7 @@ export async function PATCH(
       ...(assigneeId !== undefined && {
         assigneeId: assigneeId === null ? null : String(assigneeId),
       }),
-      ...(dueDate !== undefined && {
-        dueDate: dueDate === null ? null : (isNaN(new Date(dueDate).getTime()) ? null : new Date(dueDate)),
-      }),
+      ...(parsedDueDate !== undefined && { dueDate: parsedDueDate }),
       ...(order !== undefined && { order: Number(order) }),
     });
 

@@ -34,6 +34,40 @@ export async function PATCH(
   try {
     const body = await request.json();
     const { name, description } = body;
+
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return NextResponse.json(
+          { error: "Project name cannot be empty" },
+          { status: 400 },
+        );
+      }
+      if (name.trim().length < 2) {
+        return NextResponse.json(
+          { error: "Project name must be at least 2 characters" },
+          { status: 400 },
+        );
+      }
+      if (name.trim().length > 100) {
+        return NextResponse.json(
+          { error: "Project name must be at most 100 characters" },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (
+      description !== undefined &&
+      description !== null &&
+      typeof description === "string" &&
+      description.trim().length > 500
+    ) {
+      return NextResponse.json(
+        { error: "Description must be at most 500 characters" },
+        { status: 400 },
+      );
+    }
+
     const updatedProject = await ProjectService.update(id, {
       ...(name !== undefined && { name: String(name).trim() }),
       ...(description !== undefined && {
@@ -77,7 +111,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     );
   }
   try {
-    await ProjectService.delete(id);
+    await ProjectService.delete(id, user.id);
     return NextResponse.json({ success: true, message: "Project deleted" });
   } catch (error) {
     console.error("PROJECT DELETE ERROR:", error);

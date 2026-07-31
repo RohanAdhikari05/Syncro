@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import DashboardCards from "@/components/dashboard/DashboardCards";
 
 async function fetchApi<T>(path: string, token: string | null): Promise<T | null> {
   const headers: HeadersInit = { Accept: "application/json" };
@@ -146,69 +147,9 @@ export default async function DashboardPage() {
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
           Overview
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Stat cards */}
-          {stats.map(
-            ({ label, value, description, href, cta, accent, border }) => (
-              <Card key={label} className={`border ${border}`}>
-                <CardHeader className="pb-2">
-                  <CardDescription>{label}</CardDescription>
-                  <CardTitle className="text-4xl font-bold tabular-nums">
-                    {value}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{description}</span>
-                    <Link
-                      href={href}
-                      className={`text-xs font-medium ${accent} hover:opacity-70 transition-opacity`}
-                    >
-                      {cta}
-                    </Link>
-                  </div>
-
-                  {label === 'Total Projects' && (
-                    <div className="space-y-2">
-                      {recentProjects.map((project) => (
-                        <Link
-                          key={project.id}
-                          href={`/projects/${project.id}`}
-                          className="block rounded-xl bg-muted/70 px-3 py-2 hover:bg-muted/80 transition-colors"
-                        >
-                          <p className="text-xs font-semibold text-foreground truncate">
-                            {project.name}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground truncate">
-                            {project.status ?? "active"} · {project.members?.length ?? 0} members
-                          </p>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-
-                  {label === 'Open Tasks' && (
-                    <div className="space-y-2">
-                      {recentTasks.map((task) => (
-                        <Link
-                          key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="block rounded-xl bg-muted/70 px-3 py-2 hover:bg-muted/80 transition-colors"
-                        >
-                          <p className="text-xs font-semibold text-foreground truncate">
-                            {task.title}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground truncate">
-                            {task.resolvedProjectName}
-                          </p>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ),
-          )}
+          <DashboardCards />
 
           {/* Upcoming deadlines card */}
           <Card className="border border-border row-span-1">

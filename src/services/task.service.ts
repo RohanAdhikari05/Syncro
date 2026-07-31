@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { ProjectService } from "@/services/project.service";
 import type { Task, CreateTaskInput, UpdateTaskInput } from "@/types";
 
 export class TaskService {
@@ -211,6 +212,69 @@ export class TaskService {
    */
   static async delete(id: string): Promise<void> {
     await prisma.task.delete({ where: { id } });
+  }
+
+  // ── Assignment ────────────────────────────────────────────────────────────────
+
+  /** Assign a user to a task */
+  static async assignTask(taskId: string, assigneeId: string, requesterId: string): Promise<void> {
+    // Verify requester has permission (owner or admin of the project)
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    if (!task) throw new Error('Task not found');
+    const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
+    const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
+    if (!isOwner && !isAdmin) throw new Error('Only project owners or admins can assign tasks');
+    await prisma.task.update({ where: { id: taskId }, data: { assigneeId } });
+  }
+
+  /** Reassign a task to a different user */
+  static async reassignTask(taskId: string, newAssigneeId: string, requesterId: string): Promise<void> {
+    // Same permission check as assignTask
+    await this.assignTask(taskId, newAssigneeId, requesterId);
+  }
+
+  /** Remove assignee from a task */
+  static async removeAssignee(taskId: string, requesterId: string): Promise<void> {
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    if (!task) throw new Error('Task not found');
+    const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
+    const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
+    if (!isOwner && !isAdmin) throw new Error('Only project owners or admins can remove assignee');
+    await prisma.task.update({ where: { id: taskId }, data: { assigneeId: null } });
+  }
+
+  /** Update task status */
+  static async updateStatus(taskId: string, status: string, requesterId: string): Promise<void> {
+    // Allow assignee or project admins/owner to change status
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true, assigneeId: true } });
+    if (!task) throw new Error('Task not found');
+    const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
+    const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
+    const isAssignee = task.assigneeId === requesterId;
+    if (!isOwner && !isAdmin && !isAssignee) throw new Error('Not authorized to change status');
+    await prisma.task.update({ where: { id: taskId }, data: { status } });
+  }
+
+  /** Set task priority */
+  static async setPriority(taskId: string, priority: string, requesterId: string): Promise<void> {
+    // Only project admins/owner can change priority
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    if (!task) throw new Error('Task not found');
+    const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
+    const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
+    if (!isOwner && !isAdmin) throw new Error('Only project owners or admins can set priority');
+    await prisma.task.update({ where: { id: taskId }, data: { priority } });
+  }
+
+  /** Set task labels */
+  static async setLabels(taskId: string, labels: string[], requesterId: string): Promise<void> {
+    // Only project admins/owner can change labels
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    if (!task) throw new Error('Task not found');
+    const isOwner = await ProjectService.isUserOwner(task.projectId, requesterId);
+    const isAdmin = await ProjectService.isUserAdmin(task.projectId, requesterId);
+    if (!isOwner && !isAdmin) throw new Error('Only project owners or admins can set labels');
+    await prisma.task.update({ where: { id: taskId }, data: { labels } });
   }
 
   // ── Reorder ─────────────────────────────────────────────────────────────────

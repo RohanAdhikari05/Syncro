@@ -3,7 +3,10 @@ import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 import { ThemeProvider } from "@/components/ThemeInitializer";
+
+  
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -38,7 +41,9 @@ export default function RootLayout({
         </head>
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
           <ThemeProvider>
-            {children}
+            <ToastProvider>
+              {children}
+            </ToastProvider>
           </ThemeProvider>
         </body>
       </html>

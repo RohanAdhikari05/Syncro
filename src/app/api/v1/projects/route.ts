@@ -16,11 +16,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return NextResponse.json(
+        { error: "Project name is required" },
+        { status: 400 },
+      );
+    }
+
+    if (name.trim().length < 2) {
+      return NextResponse.json(
+        { error: "Project name must be at least 2 characters" },
+        { status: 400 },
+      );
+    }
+
+    if (name.trim().length > 100) {
+      return NextResponse.json(
+        { error: "Project name must be at most 100 characters" },
+        { status: 400 },
+      );
+    }
+
+    if (
+      description !== undefined &&
+      description !== null &&
+      typeof description === "string" &&
+      description.trim().length > 500
+    ) {
+      return NextResponse.json(
+        { error: "Description must be at most 500 characters" },
+        { status: 400 },
+      );
+    }
+
     // Create a new project.
     // The currently authenticated user becomes the owner of the project.
     const project = await ProjectService.create({
-      name: name,
-      description: description,
+      name: name.trim(),
+      description:
+        typeof description === "string" && description.trim()
+          ? description.trim()
+          : "No description provided yet.",
       ownerId: user.id,
     });
 
@@ -69,7 +105,7 @@ export async function GET(request: Request) {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       },
-      { status: 401 },
+      { status: 500 },
     );
   }
 }
